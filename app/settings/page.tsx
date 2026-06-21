@@ -13,17 +13,13 @@ function SettingsContent() {
   const router = useRouter()
   const params = useSearchParams()
   const [upgrading, setUpgrading] = useState(false)
+  const [managing, setManaging] = useState(false)
   const { cases } = useCases(user?.uid ?? null)
+  const showSuccess = params.get('upgraded') === '1'
 
   useEffect(() => {
     if (!loading && !user) router.push('/')
   }, [user, loading, router])
-
-  useEffect(() => {
-    if (params.get('upgraded') === 'true') {
-      router.replace('/settings')
-    }
-  }, [params, router])
 
   if (loading || !user) {
     return (
@@ -35,18 +31,19 @@ function SettingsContent() {
 
   const isPro = profile?.plan === 'pro'
 
-  const handleUpgrade = async () => {
-    setUpgrading(true)
+  const callStripeApi = async (endpoint: string, setter: (v: boolean) => void) => {
+    setter(true)
     try {
-      const res = await fetch('/api/stripe/checkout', {
+      const token = await user.getIdToken()
+      const res = await fetch(`/api/stripe/${endpoint}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ uid: user.uid, email: user.email }),
+        headers: { Authorization: `Bearer ${token}` },
       })
-      const { url } = await res.json()
+      const { url, error } = await res.json()
       if (url) window.location.href = url
+      if (error) alert(error)
     } finally {
-      setUpgrading(false)
+      setter(false)
     }
   }
 
@@ -67,6 +64,12 @@ function SettingsContent() {
       <main className="max-w-2xl mx-auto px-4 py-8">
         <h1 className="text-xl font-bold text-slate-800 mb-6">設定</h1>
 
+        {showSuccess && (
+          <div className="mb-4 bg-green-50 border border-green-200 text-green-700 rounded-lg px-4 py-3 text-sm">
+            ✓ Proプランへのアップグレードが完了しました！
+          </div>
+        )}
+
         <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-100">
           <Section label="アカウント">
             <Row label="表示名" value={user.displayName ?? '—'} />
@@ -78,29 +81,36 @@ function SettingsContent() {
               <div>
                 <p className="text-sm font-medium text-slate-700">
                   現在のプラン:{' '}
-                  <span className={isPro ? 'text-indigo-600' : 'text-slate-500'}>
+                  <span className={isPro ? 'text-indigo-600 font-semibold' : 'text-slate-500'}>
                     {isPro ? 'Pro' : '無料'}
                   </span>
                 </p>
                 {!isPro && (
                   <p className="text-xs text-slate-400 mt-0.5">
-                    案件管理3件まで・ダッシュボード非表示
+                    案件5件まで・ダッシュボード・CSVエクスポートはPro限定
                   </p>
+                )}
+                {isPro && (
+                  <p className="text-xs text-slate-400 mt-0.5">案件無制限・CSVエクスポート</p>
                 )}
               </div>
               {!isPro && (
                 <button
-                  onClick={handleUpgrade}
+                  onClick={() => callStripeApi('checkout', setUpgrading)}
                   disabled={upgrading}
                   className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-50 transition-colors"
                 >
-                  {upgrading ? '処理中...' : 'Proにアップグレード ¥300/月'}
+                  {upgrading ? '処理中...' : 'Proにアップグレード ¥980/月'}
                 </button>
               )}
               {isPro && (
-                <span className="bg-indigo-100 text-indigo-700 text-xs font-semibold px-3 py-1 rounded-full">
-                  ✓ Pro
-                </span>
+                <button
+                  onClick={() => callStripeApi('portal', setManaging)}
+                  disabled={managing}
+                  className="border border-indigo-200 text-indigo-600 hover:bg-indigo-50 px-4 py-2 text-sm font-medium rounded-lg disabled:opacity-50 transition-colors"
+                >
+                  {managing ? '処理中...' : 'プランを管理'}
+                </button>
               )}
             </div>
           </Section>

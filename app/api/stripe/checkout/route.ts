@@ -1,28 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { stripe } from '@/lib/stripe'
+import { stripe, PRO_PRICE_ID, APP_URL } from '@/lib/stripe'
+import { getAdminAuth, getAdminDb } from '@/lib/firebaseAdmin'
+
+export const dynamic = 'force-dynamic'
 
 export async function POST(request: NextRequest) {
+  const token = (request.headers.get('authorization') || '').replace('Bearer ', '')
+  if (!token) return NextResponse.json({ error: '認証が必要です' }, { status: 401 })
+
+  let uid: string, email: string | undefined
   try {
-    const { uid, email } = await request.json()
-
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
-      line_items: [
-        {
-          price: process.env.NEXT_PUBLIC_STRIPE_PRICE_ID!,
-          quantity: 1,
-        },
-      ],
-      mode: 'subscription',
-      customer_email: email,
-      metadata: { uid },
-      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/settings?upgraded=true`,
-      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/settings`,
-    })
-
-    return NextResponse.json({ url: session.url })
-  } catch (error) {
-    console.error('Stripe checkout error:', error)
-    return NextResponse.json({ error: 'Failed to create checkout session' }, { status: 500 })
+    const decoded = await getAdminAuth().verifyIdToken(token)
+    uid = decoded.uid
+    email = decoded.email
+  } catch {
+    return NextResponse.json({ error: '認証エラー' }, { status: 401 })
   }
+
+  const db = getAdminDb()
+  const userDoc = await db.collection('users').doc(uid).get()
+  const existingCustomerId = userDoc.data()?.stripeCustomerId as string | undefined
+
+  const session = await stripe.checkout.sessions.create({
+    payment_method_types: ['card'],
+    line_items: [{ price: PRO_PRICE_ID, quantity: 1 }],
+    mode: 'subscription',
+    ...(existingCustomerId
+      ? { customer: existingCustomerId }
+      : { customer_email: email }),
+    success_url: `${APP_URL}/settings?upgraded=1`,
+    cancel_url: `${APP_URL}/settings`,
+    locale: 'ja',
+    metadata: { uid },
+    subscription_data: { metadata: { uid } },
+  })
+
+  return NextResponse.json({ url: session.url })
 }
